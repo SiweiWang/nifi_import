@@ -3,3 +3,6 @@ templates/*
 
 # vs code local settings
 .vscode/*
+
+# pycharm local settings
+.idea/*
