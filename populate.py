@@ -9,24 +9,31 @@ from jinja2 import Template
 
 # Get command args
 parser = argparse.ArgumentParser(description='Deploy templates to secured nifi cluster')
-parser.add_argument('--hostname', metavar='hostname', dest="hostname", type=str, required=True, help="nifi cluster hostname")
+parser.add_argument('--hostname', metavar='hostname', dest="hostname", type=str, required=True,
+                    help="nifi cluster hostname")
 parser.add_argument('--port', metavar='port', type=str, dest="port", required=True, help="nifi cluster ports")
-parser.add_argument('--template-dir', metavar='template dir', type=str, dest="template_dir", required=True, help="the dir that contains nifi templates")
-parser.add_argument('--username', metavar='username', type=str, dest="username", required=True, help="username to login to nifi cluster")
-parser.add_argument('--password', metavar='password', type=str, dest="password", required=True, help="password to login to nifi cluster")
-parser.add_argument('--delete-after-create', metavar='delete after create', type=str, dest="remove_after_create", required=False, default=True, help="Delete template after it has been instantiated")
+parser.add_argument('--template-dir', metavar='template dir', type=str, dest="template_dir", required=True,
+                    default="./template", help="the dir that contains nifi templates (default to ./template)")
+parser.add_argument('--cert-file', metavar='path to cert file', type=str, dest="cert_file", required=False,
+                    default="./certs/nifi.cer", help="the path to the cert file (default to ./certs/nifi.cer)")
+parser.add_argument('--username', metavar='username', type=str, dest="username", required=False,
+                    help="username to login to nifi cluster")
+parser.add_argument('--password', metavar='password', type=str, dest="password", required=True,
+                    help="password to login to nifi cluster")
+parser.add_argument('--delete-after-create', metavar='delete after create', type=str, dest="remove_after_create",
+                    required=False, default=True, help="Delete template after it has been instantiated")
 
 args = parser.parse_args()
-print(args.accumulate(args.integers))
 
 hostname = args.hostname
 port = args.port
 template_dir = args.template_dir
 remove_after_create = args.remove_after_create
 username = args.username
-password = args.passowrd
+password = args.password
+cert_file = args.cert_file
 
-host_url= "https://" + hostname + ":" + port + "/nifi-api"
+host_url = "https://" + hostname + ":" + port + "/nifi-api"
 
 print("Host ip is {0} port is {1} and the host URL is {2}".format(hostname, port, host_url) )
 
@@ -73,7 +80,7 @@ def upload_template(template_file_name):
       'template': file_string,
     }
     auth_header = {'Authorization': 'Bearer ' + get_auth_token()}
-    response = requests.post(upload_url, files=multipart_form_data, headers= auth_header, verify=False, proxies={'https': ''})
+    response = requests.post(upload_url, files=multipart_form_data, headers= auth_header, verify=cert_file, proxies={'https': ''})
     print (response)
 
 
@@ -84,7 +91,7 @@ def instantiate_template(template_file_name, originX, originY):
     originX = originX + 600
     originY = originY - 50
     auth_header = {'Authorization': 'Bearer ' + get_auth_token()}
-    response = requests.post(create_instance_url, json=payload, headers= auth_header, verify=False, proxies={'https': ''})
+    response = requests.post(create_instance_url, json=payload, headers= auth_header, verify=cert_file, proxies={'https': ''})
     handle_error(create_instance_url, response)
 
 
@@ -92,7 +99,7 @@ def instantiate_template(template_file_name, originX, originY):
 def get_templates():
     get_template_instance_url = host_url + "/flow/templates"
     auth_header = {'Authorization': 'Bearer ' + get_auth_token()}
-    response = requests.get(get_template_instance_url,  headers= auth_header, verify=False, proxies={'https': ''})
+    response = requests.get(get_template_instance_url,  headers= auth_header, verify=cert_file, proxies={'https': ''})
     handle_error(get_template_instance_url, response)
     json = response.json()
     templates = json["templates"]
@@ -117,7 +124,7 @@ def remove_template(template_id):
     if template_id != "":
         delete_template_url = host_url + "/templates/" + template_id
         auth_header = {'Authorization': 'Bearer ' + get_auth_token()}
-        response = requests.delete(delete_template_url, headers= auth_header, verify=False, proxies={'https': ''})
+        response = requests.delete(delete_template_url, headers= auth_header, verify=cert_file, proxies={'https': ''})
         handle_error(delete_template_url, response)
     else:
         raise SystemError("Can not remove template without a template id")
@@ -128,28 +135,29 @@ def check_current_user():
     current_user_url = host_url + "/flow/current-user"
     auth_header = {'Authorization': 'Bearer ' + get_auth_token()}
     print(current_user_url)
-    res = requests.get(current_user_url, headers=auth_header, verify=False, proxies={'https': ''})
+    res = requests.get(current_user_url, headers=auth_header, verify=cert_file, proxies={'https': ''})
     handle_error(current_user_url, res)
 
 
 # get authentication token(JWT token) using username and password
 def get_auth_token() -> str:
     auth_token_url = host_url + "/access/token"
-    res = requests.post(auth_token_url, data={'username': username, 'password': password}, verify=False, proxies={'https': ''})
+    res = requests.post(auth_token_url, data={'username': username, 'password': password}, verify=cert_file, proxies={'https': ''})
     handle_error(auth_token_url, res)
     return res.text
 
 
+# Check and raise exception for a given
 def handle_error(endpoint, res):
     if not res.status_code == 200 and not res.status_code == 201:
         raise SystemError("Expect {0} call return either 200 or 401 but got status code {1} with response {2}".format(endpoint, res.status_code, res.text))
 
 
-def upload_template(template_file, origin_x, origin_y):
+# deploys a template to nifi for a specified location
+def deploy_template(template_file, origin_x, origin_y):
     remove_template(get_template_id(template_file.name))
     upload_template(template_file.name)
     instantiate_template(template_file.name, origin_x, origin_y)
-    print(remove_after_create)
     if remove_after_create == "true":
         remove_template(get_template_id(template_file.name))
 
@@ -166,7 +174,7 @@ def main():
 
     for template_file in pathlib.Path(template_dir).iterdir():
         if template_file.is_file():
-            upload_template(template_file, origin_x, origin_y)
+            deploy_template(template_file, origin_x, origin_y)
 
 
 if __name__ == "__main__":
